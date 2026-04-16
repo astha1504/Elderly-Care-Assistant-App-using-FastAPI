@@ -1,109 +1,37 @@
+import os
+import requests
+from dotenv import load_dotenv
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-from langchain.agents import Tool, initialize_agent
-from langchain.chat_models import ChatOpenAI
-from langchain.memory import ConversationBufferMemory
-import speech_recognition as sr
-import pyttsx3
+# Load environment variables from .env file
+load_dotenv()
 
-# === Voice Engine Setup ===
-engine = pyttsx3.init()
-def speak(text):
-    engine.say(text)
-    engine.runAndWait()
+API_KEY = os.getenv('API_KEY')
 
-def listen():
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("Listening...")
-        audio = recognizer.listen(source)
+if not API_KEY:
+    raise ValueError("API Key not found. Please set it in the .env file.")
+
+# Function to create a directory if it doesn't exist
+def create_directory(directory_path):
     try:
-        return recognizer.recognize_google(audio)
-    except sr.UnknownValueError:
-        return "Sorry, I didn't catch that."
-    except sr.RequestError:
-        return "API unavailable."
+        if not os.path.exists(directory_path):
+            os.makedirs(directory_path)
+            print(f"Directory created: {directory_path}")
+        else:
+            print(f"Directory already exists: {directory_path}")
+    except Exception as e:
+        print(f"Error creating directory: {e}")
 
-# === Reminder Tool ===
-def set_reminder(task: str):
-    with open("data/reminders.txt", "a") as f:
-        f.write(f"{task}\n")
-    return f"Reminder set for: {task}"
+# Example usage of create_directory
+create_directory('some_directory')
 
-reminder_tool = Tool(
-    name="SetReminder",
-    func=set_reminder,
-    description="Use this to set medication or appointment reminders for the elderly user."
-)
+# Function that interacts with API
+def fetch_data(api_url):
+    try:
+        response = requests.get(api_url, headers={'Authorization': f'Bearer {API_KEY}'})
+        response.raise_for_status()  # Raises an error for bad responses
+        return response.json()
+    except requests.exceptions.HTTPError as http_err:
+        print(f'HTTP error occurred: {http_err}')  # Log HTTP errors
+    except Exception as err:
+        print(f'Other error occurred: {err}')  # Log any other errors
 
-# === Emergency Tool ===
-def trigger_alert(symptom: str):
-    return f"Emergency alert triggered for: {symptom}. Notifying caregiver..."
-
-emergency_tool = Tool(
-    name="EmergencyAlert",
-    func=trigger_alert,
-    description="Triggers emergency alert if abnormal conditions detected (e.g., fall, chest pain)."
-)
-
-# === Companion Tool ===
-def companion_chat(message: str):
-    return f"That's interesting! Let's talk more about it."
-
-companion_tool = Tool(
-    name="CompanionChat",
-    func=companion_chat,
-    description="Provides empathetic and friendly conversation with elderly users."
-)
-
-# === Agent Factory ===
-def create_agent(tools: list):
-    llm = ChatOpenAI(temperature=0.7)
-    memory = ConversationBufferMemory(memory_key="chat_history")
-    return initialize_agent(
-        tools=tools,
-        llm=llm,
-        agent="chat-conversational-react-description",
-        memory=memory,
-        verbose=True,
-        handle_parsing_errors=True
-    )
-
-# === Create Agents ===
-reminder_agent = create_agent([reminder_tool])
-emergency_agent = create_agent([emergency_tool])
-companion_agent = create_agent([companion_tool])
-
-# === FastAPI App ===
-app = FastAPI()
-
-class Query(BaseModel):
-    user_input: str
-
-@app.post("/reminder/")
-def reminder(query: Query):
-    response = reminder_agent.run(query.user_input)
-    speak(response)
-    return {"response": response}
-
-@app.post("/emergency/")
-def emergency(query: Query):
-    response = emergency_agent.run(query.user_input)
-    speak(response)
-    return {"response": response}
-
-@app.post("/companion/")
-def companion(query: Query):
-    response = companion_agent.run(query.user_input)
-    speak(response)
-    return {"response": response}
-
-# Optional CLI trigger for voice interaction
-def voice_interaction():
-    user_input = listen()
-    response = companion_agent.run(user_input)
-    speak(response)
-
-# Uncomment to test in terminal
-# voice_interaction()
